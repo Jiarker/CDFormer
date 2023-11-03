@@ -1,0 +1,91 @@
+2023-11-03 17:02:25,697 - mmFusion - INFO - Config:
+name = 'ucgan_GF-2'
+description = 'test ucgan on PSData3/GF-2 dataset'
+model_type = 'UCGAN'
+work_dir = 'data/PSData3/model_out/ucgan_GF-2'
+log_dir = 'logs/ucgan'
+log_file = 'logs/ucgan/ucgan_GF-2.log'
+log_level = 'INFO'
+only_test = True
+checkpoint = 'data/PSData3/model_out/ucgan_GF-2/train_out/pretrained.pth'
+ms_chans = 4
+bit_depth = 10
+train_set_cfg = dict(
+    dataset=dict(
+        type='PSDataset',
+        image_dirs=['data/PSData3/Dataset/GF-2/train_full_res'],
+        bit_depth=10),
+    num_workers=0,
+    batch_size=4,
+    shuffle=True)
+test_set0_cfg = dict(
+    dataset=dict(
+        type='PSDataset',
+        image_dirs=['data/PSData3/Dataset/GF-2/test_full_res'],
+        bit_depth=10),
+    num_workers=4,
+    batch_size=4,
+    shuffle=False)
+test_set1_cfg = dict(
+    dataset=dict(
+        type='PSDataset',
+        image_dirs=['data/PSData3/Dataset/GF-2/test_low_res'],
+        bit_depth=10),
+    num_workers=4,
+    batch_size=4,
+    shuffle=False)
+cuda = True
+max_iter = 30000
+save_freq = 1500
+test_freq = 30000
+eval_freq = 1500
+norm_input = False
+optim_cfg = dict(
+    core_module=dict(type='AdamW', lr=0.0001),
+    Discriminator=dict(type='AdamW', lr=5e-05))
+sched_cfg = dict(step_size=15000, gamma=0.9)
+loss_cfg = dict(
+    QNR_loss=dict(w=1.0),
+    cyc_rec_loss=dict(type='l1', w=0.001),
+    spectral_rec_loss=dict(type='l1', w=0.0005),
+    spatial_rec_loss=dict(type='l1', w=0.0005),
+    adv_loss=dict(type='LSGAN', soft_label=True, w=0.001))
+model_cfg = dict(
+    core_module=dict(
+        hp_filter=True,
+        num_blocks=(1, 3, 1),
+        n_feats=32,
+        norm_type='IN',
+        block_type='RCA'),
+    Discriminator=dict(n_feats=32, norm_type='IN'),
+    to_pan_mode='max')
+
+2023-11-03 17:02:25,699 - mmFusion - INFO - ===> Loading Datasets
+2023-11-03 17:02:25,701 - mmFusion - INFO - ===> Building Model
+2023-11-03 17:02:25,716 - mmFusion - INFO - ===> Setting GPU
+2023-11-03 17:02:27,061 - mmFusion - INFO - ===> Loading Checkpoint
+2023-11-03 17:02:27,081 - mmFusion - INFO - ===> Setting Optimizer
+2023-11-03 17:02:27,083 - mmFusion - INFO - ===> Setting Scheduler
+2023-11-03 17:02:27,083 - mmFusion - INFO - ===> Params Count
+2023-11-03 17:02:27,084 - mmFusion - INFO - total params of "core_module": 210964
+2023-11-03 17:02:27,084 - mmFusion - INFO - total params of "Discriminator": 697313
+2023-11-03 17:02:27,084 - mmFusion - INFO - total params: 908277
+2023-11-03 17:02:27,085 - mmFusion - INFO - total trainable params of "core_module": 210964
+2023-11-03 17:02:27,085 - mmFusion - INFO - total trainable params of "Discriminator": 697313
+2023-11-03 17:02:27,086 - mmFusion - INFO - total trainable params: 908277
+2023-11-03 17:02:27,086 - mmFusion - INFO - ===> Final Testing
+2023-11-03 17:03:32,349 - mmFusion - INFO - Low resolution testing ...
+2023-11-03 17:22:41,380 - mmFusion - INFO - SAM metric value: 1.6484 +- 0.0311
+2023-11-03 17:22:44,303 - mmFusion - INFO - ERGAS metric value: 2.0353 +- 0.1389
+2023-11-03 17:22:48,770 - mmFusion - INFO - Q4 metric value: 0.9568 +- 0.0038
+2023-11-03 17:22:50,947 - mmFusion - INFO - SCC metric value: 0.9426 +- 0.0071
+2023-11-03 17:22:55,246 - mmFusion - INFO - SSIM metric value: 0.9443 +- 0.0055
+2023-11-03 17:22:57,361 - mmFusion - INFO - MPSNR metric value: 37.5502 +- 0.4672
+2023-11-03 17:22:57,361 - mmFusion - INFO - SAM metric curve: [1.6484]
+2023-11-03 17:22:57,361 - mmFusion - INFO - ERGAS metric curve: [2.0353]
+2023-11-03 17:22:57,362 - mmFusion - INFO - Q4 metric curve: [0.9568]
+2023-11-03 17:22:57,362 - mmFusion - INFO - SCC metric curve: [0.9426]
+2023-11-03 17:22:57,362 - mmFusion - INFO - SSIM metric curve: [0.9443]
+2023-11-03 17:22:57,362 - mmFusion - INFO - MPSNR metric curve: [37.5502]
+2023-11-03 17:22:57,362 - mmFusion - INFO - Avg time cost per img: 57.81322s
+2023-11-03 17:23:09,424 - mmFusion - INFO - Full resolution testing ...
