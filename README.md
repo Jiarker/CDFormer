@@ -6,25 +6,25 @@ This repo is the official implementation for [PanFormer: a Transformer Based Mod
 
 ## Architecture of CDformer
 
-![CDFormer](.\pic\CDFormer.jpg)
+![CDFormer](pic\CDFormer.jpg)
 
 
 
 # IAB
 
-![IAB](.\pic\IAB.jpg)
+![IAB](pic\IAB.jpg)
 
 
 
 # CFAM
 
-![CFAM](.\pic\CFAM.jpg)
+![CFAM](pic\CFAM.jpg)
 
 
 
 # SFAM
 
-![SFAM](.\pic\SFAM.jpg)
+![SFAM](pic\SFAM.jpg)
 
 
 
