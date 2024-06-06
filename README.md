@@ -1,30 +1,30 @@
 # CDFormer
 
-This repo is the official implementation for [PanFormer: a Transformer Based Model for Pan-sharpening](https://arxiv.org/pdf/2203.02916). 
+This repo is the official implementation for CDFormer: A Transformer-Based Network Focusing Correlation and Difference for Pansharpening  
 
 
 
 ## Architecture of CDformer
 
-![CDFormer](pic\CDFormer.jpg)
+![CDFormer](pic/CDFormer.jpg)
 
 
 
 # IAB
 
-![IAB](pic\IAB.jpg)
+![IAB](pic/IAB.jpg)
 
 
 
 # CFAM
 
-![CFAM](pic\CFAM.jpg)
+![CFAM](pic/CFAM.jpg)
 
 
 
 # SFAM
 
-![SFAM](pic\SFAM.jpg)
+![SFAM](pic/SFAM.jpg)
 
 
 
