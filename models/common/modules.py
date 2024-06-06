@@ -53,8 +53,64 @@ class ResBlock(nn.Module):
         self.basic = nn.Sequential(*self.basic)
 
     def forward(self, x):
-        return self.basic(x) + x
+        temp = self.basic(x)
+        return x + temp
 
+class InvertedResidualBlock(nn.Module):
+    def __init__(self, inp, oup, expand_ratio):
+        super(InvertedResidualBlock, self).__init__()
+        inp = int(inp)
+        oup = int(oup)
+        hidden_dim = int(inp * expand_ratio)
+        self.bottleneckBlock = nn.Sequential(
+
+            # pw 60w
+            nn.Conv2d(inp, hidden_dim, 1, bias=False),
+            nn.BatchNorm2d(hidden_dim),
+            nn.ReLU6(inplace=True),
+
+            # dw 30w
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(hidden_dim, hidden_dim, 3, groups=16, bias=False),
+            nn.BatchNorm2d(hidden_dim),
+            nn.ReLU6(inplace=True),
+
+            # pw-linear 60w
+            nn.Conv2d(hidden_dim, oup, 1, bias=False),
+            # conv1x1(hidden_dim, oup),
+            nn.BatchNorm2d(oup),
+            nn.ReLU6(inplace=True),
+
+        )
+    def forward(self, x):
+        return self.bottleneckBlock(x)
+
+class INN(nn.Module):
+    def __init__(self, in_channels, out_channels, iter=1):
+        super(INN, self).__init__()
+        self.n_blocks = iter
+        self.theta_phi = nn.ModuleList()
+        self.theta_rho = nn.ModuleList()
+        self.theta_eta = nn.ModuleList()
+        for _ in range(self.n_blocks):
+            self.theta_phi.append(InvertedResidualBlock(inp=in_channels, oup=out_channels, expand_ratio=1))
+            self.theta_rho.append(InvertedResidualBlock(inp=in_channels, oup=out_channels, expand_ratio=1))
+            self.theta_eta.append(InvertedResidualBlock(inp=in_channels, oup=out_channels, expand_ratio=1))
+
+    def forward(self, z1, z2):
+        # 进行格式重排(Transformer将数据变换为:[batch, w, h, head]),图像数据为[batch, head/c, w, h]
+        z1 = z1.permute(0, 3, 1, 2)
+        z2 = z2.permute(0, 3, 1, 2)
+
+        for i in range(self.n_blocks):
+            z2 = z2 + self.theta_phi[i](z1)
+            z1 = z1 * torch.exp(self.theta_rho[i](z2)) + self.theta_eta[i](z2)
+            # z1, z2 = z2, z1
+
+        z1 = z1.permute(0, 2, 3, 1)
+        z2 = z2.permute(0, 2, 3, 1)
+
+        return z1, z2
 
 class ResChAttnBlock(nn.Module):
     r"""
@@ -329,7 +385,7 @@ def get_relative_distances(window_size):
 
 
 class WindowAttention(nn.Module):
-    def __init__(self, dim, heads, head_dim, shifted, window_size, relative_pos_embedding, cross_attn):
+    def __init__(self, dim, heads, head_dim, shifted, window_size, relative_pos_embedding, cross_attn, h_attn, inn_iter):
         super().__init__()
         inner_dim = head_dim * heads
 
@@ -339,6 +395,9 @@ class WindowAttention(nn.Module):
         self.relative_pos_embedding = relative_pos_embedding
         self.shifted = shifted
         self.cross_attn = cross_attn
+        if self.cross_attn:
+            self.inn = INN(inner_dim, inner_dim, inn_iter)
+        self.h_attn = h_attn
 
         if self.shifted:
             displacement = window_size // 2
@@ -364,6 +423,7 @@ class WindowAttention(nn.Module):
         self.to_out = nn.Linear(inner_dim, dim)
 
     def forward(self, x, y=None):
+
         if self.shifted:
             x = self.cyclic_shift(x)
             if self.cross_attn:
@@ -373,10 +433,29 @@ class WindowAttention(nn.Module):
         # print('forward-x: ', x.shape)   # [N, H//downscaling_factor, W//downscaling_factor, hidden_dim]
         if not self.cross_attn:
             qkv = self.to_qkv(x).chunk(3, dim=-1)
-            # [N, H//downscaling_factor, W//downscaling_factor, head_dim * head] * 3
+            # [N, H//downscaling_factor, W//downscaling_factor, head_dim * heads] * 3
         else:
             kv = self.to_kv(x).chunk(2, dim=-1)
-            qkv = (self.to_q(y), kv[0], kv[1])
+            k = kv[0]
+            v = kv[1]
+            q = self.to_q(y)
+
+            # np_x = x.cpu().detach().numpy()
+            # np_q = q.cpu().detach().numpy()
+            # np_k = k.cpu().detach().numpy()
+            # np_v = v.cpu().detach().numpy()
+
+            # 加入INN；Q恒等映射,K有变换
+            k_inn, q_inn = self.inn(k, q)
+            # 高频映射
+            if self.h_attn:
+                k = k - k_inn
+                q = q_inn
+            else:
+                k = k_inn
+                q = q_inn
+
+            qkv = (q, k, v)
 
         nw_h = n_h // self.window_size
         nw_w = n_w // self.window_size
@@ -390,6 +469,8 @@ class WindowAttention(nn.Module):
 
         dots = einsum('b h w i d, b h w j d -> b h w i j', q, k) * self.scale  # q * k / sqrt(d)
 
+        # 更改.relative_indices类型
+        self.relative_indices = self.relative_indices.long()
         if self.relative_pos_embedding:
             dots += self.pos_embedding[self.relative_indices[:, :, 0], self.relative_indices[:, :, 1]]
         else:
@@ -413,7 +494,7 @@ class WindowAttention(nn.Module):
 
 
 class SwinBlock(nn.Module):
-    def __init__(self, dim, heads, head_dim, mlp_dim, shifted, window_size, relative_pos_embedding, cross_attn):
+    def __init__(self, dim, heads, head_dim, mlp_dim, shifted, window_size, relative_pos_embedding, cross_attn, h_attn, inn_iter):
         super().__init__()
         self.attention_block = Residual(PreNorm(dim, WindowAttention(dim=dim,
                                                                      heads=heads,
@@ -421,7 +502,9 @@ class SwinBlock(nn.Module):
                                                                      shifted=shifted,
                                                                      window_size=window_size,
                                                                      relative_pos_embedding=relative_pos_embedding,
-                                                                     cross_attn=cross_attn)))
+                                                                     cross_attn=cross_attn,
+                                                                     h_attn=h_attn,
+                                                                     inn_iter=inn_iter)))
         self.mlp_block = Residual(PreNorm(dim, FeedForward(dim=dim, hidden_dim=mlp_dim)))
 
     def forward(self, x, y=None):
@@ -444,10 +527,14 @@ class PatchMerging(nn.Module):
         x = self.linear(x)
         return x  # [N, H//downscaling_factor, W//downscaling_factor, out_channels]
 
-
+# 在 Swin Transformer 中，regular block 和 shifted block 交替执行是为了提高模型对多尺度信息的感知。这样的设计考虑到了图像中不同位置的特征可能具有不同的重要性。
+# 通过交替执行 regular block 和 shifted block，模型能够有效地捕捉到全局和局部的特征。
+# 1. **Regular Block（正常块）**：Regular block 使用常规的注意力机制，适用于捕捉全局信息。这种块有助于处理较大尺度的特征。
+# 2. **Shifted Block（位置偏移块）**：Shifted block 在注意力机制中引入了位置偏移，通过这种方式，模型更容易捕捉到局部信息。位置偏移可以使得模型更加关注邻近的特征，有助于处理较小尺度的特征。
+# 通过这种交替的设计，Swin Transformer 可以在多个尺度上有效地捕捉图像特征，提高模型的感知能力。这对于处理不同尺寸的对象或图像中的结构变化非常有帮助。
 class SwinModule(nn.Module):
-    def __init__(self, in_channels, hidden_dimension, layers, downscaling_factor, num_heads, head_dim, window_size,
-                 relative_pos_embedding, cross_attn):
+    def __init__(self, in_channels=4, hidden_dimension=32, layers=2, downscaling_factor=1, num_heads=4, head_dim=16, window_size=4,
+                 relative_pos_embedding=True, cross_attn=False, h_attn=False, inn_iter=1):
         r"""
         Args:
             in_channels(int): 输入通道数
@@ -457,22 +544,25 @@ class SwinModule(nn.Module):
             num_heads: multi-attn 的 attn 头的个数
             head_dim:   每个attn 头的维数
             window_size:    窗口大小，窗口内进行attn运算
+            relative_pos_embedding: 相对位置编码
+            cross_attn: 交叉注意力机制(有两个输入时一定要使用)
+            h_attn: 第二个输入是否为高频信息.若为高频,则对INN的结果需要进行反转
         """
         super().__init__()
-        assert layers % 2 == 0, 'Stage layers need to be divisible by 2 for regular and shifted block.'
-
+        # assert layers % 2 == 0, 'Stage layers need to be divisible by 2 for regular and shifted block.'
+        layers = layers * 2
         self.patch_partition = PatchMerging(in_channels=in_channels, out_channels=hidden_dimension,
                                             downscaling_factor=downscaling_factor)
 
         self.layers = nn.ModuleList([])
-        for _ in range(layers // 2):
+        for _ in range(layers):
             self.layers.append(nn.ModuleList([
                 SwinBlock(dim=hidden_dimension, heads=num_heads, head_dim=head_dim, mlp_dim=hidden_dimension * 4,
                           shifted=False, window_size=window_size, relative_pos_embedding=relative_pos_embedding,
-                          cross_attn=cross_attn),
+                          cross_attn=cross_attn, h_attn=h_attn, inn_iter=inn_iter),
                 SwinBlock(dim=hidden_dimension, heads=num_heads, head_dim=head_dim, mlp_dim=hidden_dimension * 4,
                           shifted=True, window_size=window_size, relative_pos_embedding=relative_pos_embedding,
-                          cross_attn=cross_attn),
+                          cross_attn=cross_attn, h_attn=h_attn, inn_iter=inn_iter),
             ]))
 
     def forward(self, x, y=None):
@@ -485,12 +575,12 @@ class SwinModule(nn.Module):
             # [N, hidden_dim,  H//downscaling_factor, W//downscaling_factor]
         else:
             x = self.patch_partition(x)
+            # np_x = x.cpu().detach().numpy()
             y = self.patch_partition(y)
             for regular_block, shifted_block in self.layers:
                 x = regular_block(x, y)
                 x = shifted_block(x, y)
             return x.permute(0, 3, 1, 2)
-
 
 if __name__ == '__main__':
     x = torch.ones([1, 1, 64, 64])

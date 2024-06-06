@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
+import pywt
 
 def weight_init(m):
     r"""
@@ -84,9 +84,31 @@ def get_hp(data):
     Returns:
         torch.Tensor: high-frequency part of input, shape of [N, C, H, W]
     """
-    rs = F.avg_pool2d(data, kernel_size=5, stride=1, padding=2)
+    # 计算每个通道的平均值
+    channel_means = data.mean([2, 3])
+    # 为图像添加自定义填充
+    pad_size = 2
+    # 为批次中的每个图象添加复制填充
+    padded_batch = F.pad(data, (pad_size, pad_size, pad_size, pad_size), 'replicate')
+    # 将通道平均值填充到边界
+    rs = F.avg_pool2d(padded_batch, kernel_size=5, stride=1)
     rs = data - rs
     return rs
+
+def dwt2d(x):
+    # 将输入张量转换为numpy数组
+    x_np = x.cpu().detach().numpy()
+    # 使用PyWavelets进行小波变换
+    coeffs = pywt.wavedec2(x_np, wavelet='haar', level=1)
+    # 将结果转换回PyTorch张量
+    cA, (cH, cV, cD)= coeffs
+    cA_tensor = torch.from_numpy(cA).cuda()
+    cH_tensor = torch.from_numpy(cH).cuda()
+    cV_tensor = torch.from_numpy(cV).cuda()
+    cD_tensor = torch.from_numpy(cD).cuda()
+    l_result = cA_tensor
+    h_result = torch.cat([cH_tensor, cV_tensor, cD_tensor], dim=1)
+    return l_result, h_result
 
 
 def set_batch_cuda(sample_batched):
@@ -109,7 +131,7 @@ def up_sample(imgs, r=4, mode='bicubic'):
 
     Args:
         imgs (torch.Tensor): input images, shape of [N, C, H, W]
-        r (int): scale ratio, Default: 4
+        r (int): scale ratio, Default: 2
         mode (str): interpolate mode, Default: 'bicubic'
     Returns:
         torch.Tensor: images after un-sampling, shape of [N, C, H*r, W*r]
@@ -159,4 +181,31 @@ def calc_img_grad(imgs):
     """
     ret = (torch.abs(imgs[:, :, :-1, :-1] - imgs[:, :, 1:, :-1]) +
            torch.abs(imgs[:, :, :-1, :-1] - imgs[:, :, :-1, 1:])) / 2.
+    return ret
+
+def data_normalize(img, bit_depth):
+    """ Normalize the data to [0, 1)
+
+    Args:
+        img_dict (dict[str, torch.Tensor]): images in torch.Tensor
+        bit_depth (int): original data range in n-bit
+    Returns:
+        dict[str, torch.Tensor]: images after normalization
+    """
+    max_value = 2 ** bit_depth - .5
+    img = img / max_value
+    return img
+
+
+def data_denormalize(img, bit_depth):
+    """ Denormalize the data to [0, n-bit)
+
+    Args:
+        img (torch.Tensor | np.ndarray): images in torch.Tensor
+        bit_depth (int): original data range in n-bit
+    Returns:
+        dict[str, torch.Tensor]: image after denormalize
+    """
+    max_value = 2 ** bit_depth - .5
+    ret = img * max_value
     return ret

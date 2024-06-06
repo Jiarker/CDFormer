@@ -12,20 +12,20 @@ from datasets.utils import save_image
 
 def parse_args():
     parser = argparse.ArgumentParser(description='clip into patches')
-    parser.add_argument('-d', '--data_dir', required=True, help='root of data directory')
-    parser.add_argument('-s', '--satellite', required=True, help='name of the satellite/dataset')
-    parser.add_argument('-n', required=True, type=int, help='total number of images pairs')
-    parser.add_argument('-p', '--patch_num', required=True, type=int,
+    parser.add_argument('-d', '--data_dir', required=False, default='', help='root of data directory')
+    parser.add_argument('-s', '--satellite', required=False, default='WV-3', help='name of the satellite/dataset')
+    parser.add_argument('-n', required=False, default=3, type=int, help='total number of images pairs')
+    parser.add_argument('-p', '--patch_num', required=False, default=5000, type=int,   # 每张图片的patch_num
                         help='random clip how many patches for one training scene')
     parser.add_argument('-r', '--rand_seed', type=int, default=0,
                         help='random seed to sample training patches')
-    parser.add_argument('--no_low_train', action='store_true',
+    parser.add_argument('--no_low_train', action='store_true', default=False,
                         help='whether generate low-resolution training set or not')
-    parser.add_argument('--no_full_train', action='store_true',
+    parser.add_argument('--no_full_train', action='store_true', default=True,
                         help='whether generate full-resolution training set or not')
-    parser.add_argument('--no_low_test', action='store_true',
+    parser.add_argument('--no_low_test', action='store_true', default=True,
                         help='whether generate low-resolution testing set or not')
-    parser.add_argument('--no_full_test', action='store_true',
+    parser.add_argument('--no_full_test', action='store_true', default=True,
                         help='whether generate ful-resolution testing set or not')
     return parser.parse_args()
 

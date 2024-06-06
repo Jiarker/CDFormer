@@ -69,8 +69,8 @@ class AdversarialLoss(nn.Module):
         Returns:
             (torch.Tensor, torch.Tensor): loss of G, loss of D
         """
-        fake_detach = fake.detach()
-        real_detach = real.detach()
+        fake_detach = fake.detach().clone()
+        real_detach = real.detach().clone()
 
         D_optim.zero_grad()
         # calculate d_loss

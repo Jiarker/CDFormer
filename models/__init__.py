@@ -1,6 +1,6 @@
 from .builder import MODELS
-from .ucgan import UCGAN
+from .cdformer import CDFormer
 
 __all__ = [
-    'MODELS', 'UCGAN'
+    'MODELS', 'CDFormer'
 ]

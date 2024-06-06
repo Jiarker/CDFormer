@@ -12,6 +12,7 @@ from datasets.utils import save_image, data_augmentation, data_denormalize
 from .common.utils import torch2np, smart_time, set_batch_cuda, up_sample
 from .common.losses import get_loss_module
 from .common import metrics as mtc
+from torch.utils.tensorboard import SummaryWriter
 
 
 class Base_model:
@@ -43,6 +44,23 @@ class Base_model:
         self.switch_dict = {}
         self.loss_module = get_loss_module(full_cfg=cfg, logger=logger)
         self.last_iter = 0
+
+        self.writer = SummaryWriter()
+
+    def showData(self, value, epoch):
+        for name in value:
+            target = None
+            if name.find('loss') != -1:
+                target = 'Loss/' + name
+            elif name.find('mean') != -1:
+                target = 'metric_mean/' + name
+
+            if target is not None:
+                if isinstance(value[name], float):
+                    self.writer.add_scalar(target, value[name], epoch)
+                else:
+                    for item in (value[name]):
+                        self.writer.add_scalar(target, item, epoch)
 
     def add_module(self, module_name: str, module: nn.Module, switch=True):
         assert isinstance(module, nn.Module)
@@ -89,16 +107,6 @@ class Base_model:
             loss = self.loss_module[loss_name]
             self.loss_module[loss_name] = loss.cuda()
 
-    # add by myself
-    # def set_cpu(self):
-    #     for module_name in self.module_dict:
-    #         self.logger.debug(module_name)
-    #         module = self.module_dict[module_name]
-    #         self.module_dict[module_name] = module.cpu()
-    #     for loss_name in self.loss_module:
-    #         loss = self.loss_module[loss_name]
-    #         self.loss_module[loss_name] = loss.cpu()
-
     def load_checkpoint(self, path: str):
         checkpoint = torch.load(path)
         self.last_iter = checkpoint["iter_num"]
@@ -108,10 +116,14 @@ class Base_model:
             module.load_state_dict(checkpoint[module_name].state_dict())
 
     def load_pretrained(self, path: str):
+
         checkpoint = torch.load(path)
         for module_name in self.module_dict:
             module = self.module_dict[module_name]
             module.load_state_dict(checkpoint[module_name].state_dict())
+
+        # 保存.pth
+        torch.save(module.state_dict(),'data/pretrain.pth')
 
     def set_optim(self):
         optim_cfg = self.cfg.get('optim_cfg', {})
@@ -176,7 +188,8 @@ class Base_model:
                 for module in self.module_dict.values():
                     module.train()
                 self.before_train_iter()
-                self.train_iter(iter_id=iter_id, input_batch=input_batch)
+                loss_res = self.train_iter(iter_id=iter_id, input_batch=input_batch)
+                self.showData(loss_res, iter_id)
                 self.after_train_iter()
 
                 def should(freq):
@@ -185,7 +198,7 @@ class Base_model:
                 if should(self.cfg.save_freq):
                     self.save(iter_id=iter_id)
                 if should(self.cfg.eval_freq):
-                    self.test(iter_id=iter_id, save=should(self.cfg.test_freq), ref=False)
+                    # self.test(iter_id=iter_id, save=should(self.cfg.test_freq), ref=False)
                     self.test(iter_id=iter_id, save=should(self.cfg.test_freq), ref=True)
                 for sched_name in self.sched_dict:
                     if self.switch_dict[sched_name]:
@@ -196,27 +209,27 @@ class Base_model:
 
         self.after_train()
 
-    def train_iter(self, iter_id, input_batch, log_freq=10):
-        r""" train for one iteration
-
-        Args:
-            iter_id (int): current iteration id
-            input_batch (dict[str, torch.Tensor | str]): a batch of data from Dataloader
-            log_freq (int): every n iterations to print the value of loss
-        """
-        core_optim = self.optim_dict['core_module']
-
-        target = input_batch['target']
-        output = self.get_model_output(input_batch=input_batch)
-
-        rec_loss = self.loss_module['rec_loss']
-        loss = rec_loss(output, target)
-
-        core_optim.zero_grad()
-        loss.backward()
-        core_optim.step()
-
-        self.print_train_log(iter_id, dict(full_loss=loss), log_freq)
+    # def train_iter(self, iter_id, input_batch, log_freq=10):
+    #     r""" train for one iteration
+    #
+    #     Args:
+    #         iter_id (int): current iteration id
+    #         input_batch (dict[str, torch.Tensor | str]): a batch of data from Dataloader
+    #         log_freq (int): every n iterations to print the value of loss
+    #     """
+    #     core_optim = self.optim_dict['core_module']
+    #
+    #     target = input_batch['target']
+    #     output = self.get_model_output(input_batch=input_batch)
+    #
+    #     rec_loss = self.loss_module['rec_loss']
+    #     loss = rec_loss(output, target)
+    #
+    #     core_optim.zero_grad()
+    #     loss.backward()
+    #     core_optim.step()
+    #
+    #     self.print_train_log(iter_id, dict(full_loss=loss), log_freq)
 
     def print_train_log(self, iter_id, loss_res, log_freq=10):
         r""" print current loss at one iteration
@@ -232,30 +245,33 @@ class Base_model:
             self.logger.info(f'===> training iteration[{iter_id}/{self.cfg.max_iter}] '
                              f'lr: {self.optim_dict["core_module"].param_groups[0]["lr"]:.6f}, '
                              f'ETA: {smart_time(remain_time)}')
-            self.logger.info(f'full loss: {loss_res["full_loss"]:.6f}')
+            # self.logger.info(f'full loss: {loss_res["full_loss"]:.6f}')
             for loss_name in loss_res:
+                if 'ms_adv_loss' in loss_name:
+                    self.logger.info(f'{loss_name}_{self.loss_module[loss_name].get_type()}: '
+                                     f'(G:{loss_res[loss_name][0]:.6f}, D:{loss_res[loss_name][1]:.6f})')
+                    # print(f'{loss_name}_{self.loss_module[loss_name].get_type()}: '
+                    #                  f'(G:{loss_res[loss_name][0]:.6f}, D:{loss_res[loss_name][1]:.6f})')
+
+                if 'pan_adv_loss' in loss_name:
+                    self.logger.info(f'{loss_name}_{self.loss_module[loss_name].get_type()}: '
+                                     f'(G:{loss_res[loss_name][0]:.6f}, D:{loss_res[loss_name][1]:.6f})')
+                    # print(f'{loss_name}_{self.loss_module[loss_name].get_type()}: '
+                    #                  f'(G:{loss_res[loss_name][0]:.6f}, D:{loss_res[loss_name][1]:.6f})')
+
                 if 'rec_loss' in loss_name:
                     self.logger.info(f'{loss_name}_{self.loss_module[loss_name].get_type()}: '
                                      f'{loss_res[loss_name]:.6f}')
-                if 'adv_loss' in loss_name:
-                    self.logger.info(f'{loss_name}_{self.loss_module[loss_name].get_type()}: '
-                                     f'(G:{loss_res[loss_name][0]:.6f}, D:{loss_res[loss_name][1]:.6f})')
+                    # print(f'{loss_name}_{self.loss_module[loss_name].get_type()}: '
+                    #                  f'{loss_res[loss_name]:.6f}')
+
                 if 'QNR_loss' in loss_name:
                     self.logger.info(f'QNR_loss: {loss_res[loss_name]:.6f}')
+                    # print(f'QNR_loss: {loss_res[loss_name]:.6f}')
 
-    def get_model_output(self, input_batch):
-        r""" get the output from the model
-
-        Args:
-            input_batch (dict[str, torch.Tensor | str]): a batch of data from Dataloader
-        Returns:
-            torch.Tensor: output from the model, shape like [N, C, H, W]
-        """
-        core_module = self.module_dict['core_module']
-        input_pan = input_batch['input_pan']
-        input_lr = input_batch['input_lr']
-        input_lr_u = up_sample(input_lr)
-        return core_module(input_pan, input_lr_u, input_lr)
+                if 'full_loss' in loss_name:
+                    self.logger.info(f'full_loss: {loss_res[loss_name]:.6f}')
+                    # print(f'full_loss: {loss_res[loss_name]:.6f}')
 
     def test(self, iter_id, save, ref):
         r""" test and evaluate the model
@@ -288,9 +304,26 @@ class Base_model:
             image_ids = input_batch['image_id']
             n = len(image_ids)
             tot_count += n
+
+            Core = self.module_dict['core_module']
+            # print("alpha in test:", G_core.alpha_parameter.data)
+            # G_ms = self.module_dict['ms_module']
+            # G_pan = self.module_dict['pan_module']
+
+            # 加载alpha
+            # if Core.alpha_parameter is not None:
+            #     alpha = Core.alpha_parameter.item()
+            #     Core.updateAlpha(alpha)
+
             timer = mmcv.Timer()
             with torch.no_grad():
-                output = self.get_model_output(input_batch=input_batch)
+                # 模型运行
+                # 初始化各类型的遥感图像
+                input_pan = input_batch['input_pan']
+                input_lr = input_batch['input_lr']
+
+                # 模型运行
+                output, _, _ = Core(input_lr, input_pan)
             tot_time += timer.since_start()
 
             input_pan = torch2np(input_batch['input_pan'])  # shape of [N, H, W]
@@ -299,19 +332,20 @@ class Base_model:
                 target = torch2np(input_batch['target'])
             output_np = torch2np(output)
 
-            if 'norm_input' in self.cfg and self.cfg.norm_input:
-                input_pan = data_denormalize(input_pan, self.cfg.bit_depth)
-                input_lr = data_denormalize(input_lr, self.cfg.bit_depth)
-                if ref:
-                    target = data_denormalize(target, self.cfg.bit_depth)
-                output = data_denormalize(output, self.cfg.bit_depth)
+            # if 'norm_input' in self.cfg and self.cfg.norm_input:
+            #     input_pan = data_denormalize(input_pan, self.cfg.bit_depth)
+            #     input_lr = data_denormalize(input_lr, self.cfg.bit_depth)
+            #     if ref:
+            #         target = data_denormalize(target, self.cfg.bit_depth)
+            #     output = data_denormalize(output, self.cfg.bit_depth)
 
             for i in range(n):
 
                 if ref:
                     tmp_results['SAM'].append(mtc.SAM_numpy(target[i], output_np[i], sewar=use_sewar))
                     tmp_results['ERGAS'].append(mtc.ERGAS_numpy(target[i], output_np[i], sewar=use_sewar))
-                    tmp_results['Q4'].append(mtc.Q4_numpy(target[i], output_np[i]))
+                    if self.cfg.ms_chans == 4:
+                        tmp_results['Q4'].append(mtc.Q4_numpy(target[i], output_np[i]))
                     tmp_results['SCC'].append(mtc.SCC_numpy(target[i], output_np[i], sewar=use_sewar))
                     tmp_results['SSIM'].append(mtc.SSIM_numpy(target[i], output_np[i], 2 ** self.cfg.bit_depth - 1,
                                                               sewar=use_sewar))
@@ -342,6 +376,8 @@ class Base_model:
                 mean_array = self.eval_results[f'{metric}_mean']
                 self.logger.info(f'{metric} metric curve: {mean_array}')
         self.logger.info(f'Avg time cost per img: {tot_time / tot_count:.5f}s')
+
+        self.showData(self.eval_results, iter_id)
 
     def save(self, iter_id):
         r""" save the weights of model to checkpoint

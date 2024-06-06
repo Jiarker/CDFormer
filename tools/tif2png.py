@@ -11,10 +11,11 @@ import mmcv
 
 import os.path as osp
 
+tif_path = ''
 
 def parse_args():
     parser = argparse.ArgumentParser(description='convert .TIF to visible .png')
-    parser.add_argument('-s', '--src_file', required=True, help='source file name')
+    parser.add_argument('-s', '--src_file', default=tif_path, help='source file name')
     parser.add_argument('-n', '--num', type=int, default=1, help='total image id to convert')
     parser.add_argument('-d', '--dst_dir', default='examples', help='saved directory')
     return parser.parse_args()

@@ -12,7 +12,7 @@ from .utils import _is_pan_image, get_image_id, load_image, data_normalize
 # use the registry to manage the module
 @DATASETS.register_module()
 class PSDataset(data.Dataset):
-    def __init__(self, image_dirs, bit_depth, norm_input=False):
+    def __init__(self, image_dirs, bit_depth):
         r""" Build dataset from folders
 
         Args:
@@ -24,7 +24,6 @@ class PSDataset(data.Dataset):
 
         self.image_dirs = image_dirs
         self.bit_depth = bit_depth
-        self.norm_input = norm_input
         self.image_ids = []
         self.image_prefix_names = []  # full-path filename prefix
         for y in image_dirs:
@@ -42,7 +41,10 @@ class PSDataset(data.Dataset):
             input_pan=load_image('{}_pan.tif'.format(prefix_name))[np.newaxis, :],  # [1,256,256] PAN
         )
         if os.path.exists('{}_mul.tif'.format(prefix_name)) and len(self.image_dirs) == 1:
-            input_dict['target'] = load_image('{}_mul.tif'.format(prefix_name))  # [4,256,256] HR MS gt
+            input_dict['target'] = load_image('{}_mul.tif'.format(prefix_name))  # [4,128,128] HR MS gt
+        # elif os.path.exists('{}_lr_u.tif'.format(prefix_name)) and len(self.image_dirs) == 1:
+        #     input_dict['target'] = load_image('{}_lr_u.tif'.format(prefix_name))  # [4,128,128] HR MS gt
+
 
         # [1,64,64] Gaussian Degraded PAN
         input_dict['input_pan_l'] = cv2.pyrDown(cv2.pyrDown(input_dict['input_pan'][0]))[np.newaxis, :]
@@ -50,8 +52,8 @@ class PSDataset(data.Dataset):
         for key in input_dict:  # numpy2torch
             input_dict[key] = torch.from_numpy(input_dict[key]).float()
 
-        if self.norm_input:
-            input_dict = data_normalize(input_dict, self.bit_depth)
+        # if self.norm_input:
+        #     input_dict = data_normalize(input_dict, self.bit_depth)
 
         input_dict['image_id'] = self.image_ids[index]
         return input_dict
